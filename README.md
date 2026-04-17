@@ -1,109 +1,323 @@
-# Day 12 — Deployment: Đưa Agent Lên Cloud
+# Day 12 - Cloud Infrastructure and Deployment
 
-> **AICB-P1 · VinUniversity 2026**  
-> Repository thực hành đi kèm bài giảng Day 12.  
-> Mỗi phần có ví dụ **cơ bản** (hiểu concept) và **chuyên sâu** (production-ready).
+Repository bài lab Day 12 về triển khai AI agent lên môi trường production.
+
+Bài này tập trung vào các kỹ năng deployment/backend infrastructure:
+
+- Phân biệt môi trường localhost và production.
+- Dockerize ứng dụng bằng Docker và Docker Compose.
+- Deploy service lên cloud bằng Railway.
+- Bảo vệ API bằng API key authentication.
+- Rate limiting để giới hạn request.
+- Cost guard để tránh vượt ngân sách.
+- Health check, readiness check và graceful shutdown.
+- Stateless design với Redis.
+- Load balancing bằng Nginx.
+
+Lưu ý: toàn bộ lab đang dùng mock LLM, không gọi OpenAI/Anthropic thật. Điều này đúng với yêu cầu của `CODE_LAB.md`, vì lab không yêu cầu OpenAI API key.
+
+---
+
+## Trạng Thái Hoàn Thành
+
+- Part 1: đã chạy local basic app và phân tích anti-patterns.
+- Part 2: đã build Docker image develop và advanced.
+- Part 2: đã chạy Docker Compose stack gồm agent, Redis, Qdrant và Nginx.
+- Part 3: đã deploy lên Railway.
+- Part 4: đã kiểm tra authentication, rate limiting và cost guard.
+- Part 5: đã chạy scaling demo với 3 agent instances, Redis và Nginx.
+- Part 6: final production agent trong `06-lab-complete` đã pass readiness checker `25/25`.
+
+Public URL:
+
+```text
+https://agent-production-b973.up.railway.app
+```
+
+Kết quả kiểm tra chính:
+
+```text
+GET  /health  -> 200
+GET  /ready   -> 200
+POST /ask     -> 401 nếu thiếu API key
+POST /ask     -> 200 nếu có API key hợp lệ
+Rate limit    -> 429 sau khi vượt 10 request/phút/user
+```
 
 ---
 
 ## Cấu Trúc Project
 
-```
+```text
 day12_ha-tang-cloud_va_deployment/
-├── 01-localhost-vs-production/     # Section 1: Dev ≠ Production
-│   ├── develop/                      #   Agent "đúng kiểu localhost"
-│   └── production/                   #   12-Factor compliant agent
-│
-├── 02-docker/                      # Section 2: Containerization
-│   ├── develop/                      #   Dockerfile đơn giản
-│   └── production/                   #   Multi-stage + Docker Compose stack
-│
-├── 03-cloud-deployment/            # Section 3: Cloud Options
-│   ├── railway/                    #   Deploy Railway (< 5 phút)
-│   ├── render/                     #   Deploy Render + render.yaml
-│   └── production-cloud-run/         #   GCP Cloud Run + CI/CD
-│
-├── 04-api-gateway/                 # Section 4: Security
-│   ├── develop/                      #   API Key authentication
-│   └── production/                   #   JWT + Rate Limiting + Cost Guard
-│
-├── 05-scaling-reliability/         # Section 5: Scale & Reliability
-│   ├── develop/                      #   Health check + graceful shutdown
-│   └── production/                   #   Stateless + Redis + Nginx LB
-│
-├── 06-lab-complete/                # Lab 12: Production-ready agent
-│   └── (full project kết hợp tất cả)
-│
-└── utils/                          # Mock LLM dùng chung (không cần API key)
+├── 01-localhost-vs-production/
+│   ├── develop/                 # App local cơ bản, có nhiều anti-pattern
+│   └── production/              # Bản advanced theo 12-factor app
+├── 02-docker/
+│   ├── develop/                 # Dockerfile single-stage
+│   └── production/              # Multi-stage Dockerfile + Compose stack
+├── 03-cloud-deployment/
+│   ├── railway/                 # Cấu hình Railway
+│   ├── render/                  # Cấu hình Render
+│   └── production-cloud-run/    # Ví dụ Cloud Run
+├── 04-api-gateway/
+│   ├── develop/                 # API key authentication
+│   └── production/              # JWT, rate limit, cost guard
+├── 05-scaling-reliability/
+│   ├── develop/                 # Health check và graceful shutdown
+│   └── production/              # Stateless Redis + Nginx load balancer
+├── 06-lab-complete/             # Final production-ready agent
+├── screenshots/                 # Ảnh chụp kết quả deploy/test
+├── CODE_LAB.md                  # Hướng dẫn lab
+├── DAY12_DELIVERY_CHECKLIST.md  # Checklist nộp bài
+├── MISSION_ANSWERS.md           # Câu trả lời các bài tập
+└── DEPLOYMENT.md                # Thông tin deploy public service
 ```
 
 ---
 
-## 🚀 Bắt Đầu Nhanh
+## Tài Liệu Quan Trọng
 
-**Muốn thử ngay?** → [QUICK_START.md](QUICK_START.md) (5 phút)
-
-**Muốn học kỹ?** → [CODE_LAB.md](CODE_LAB.md) (3-4 giờ)
-
-## Cách Học
-
-| Bước | Làm gì |
-|------|--------|
-| 0 | **[Khuyến nghị]** Đọc [QUICK_START.md](QUICK_START.md) để thử nhanh |
-| 1 | Đọc [CODE_LAB.md](CODE_LAB.md) để hiểu chi tiết |
-| 2 | Chạy ví dụ **basic** trước — hiểu concept |
-| 3 | So sánh với ví dụ **advanced** — thấy sự khác biệt |
-| 4 | Tự làm Lab 06 từ đầu trước khi xem solution |
-| 5 | Tham khảo [QUICK_REFERENCE.md](QUICK_REFERENCE.md) khi cần |
-| 6 | Xem [TROUBLESHOOTING.md](TROUBLESHOOTING.md) khi gặp lỗi |
+- `CODE_LAB.md`: hướng dẫn làm từng phần của lab.
+- `DAY12_DELIVERY_CHECKLIST.md`: tiêu chí nộp bài.
+- `MISSION_ANSWERS.md`: câu trả lời và kết quả kiểm tra từng exercise.
+- `DEPLOYMENT.md`: public URL, test commands, environment variables và screenshots.
+- `06-lab-complete/README.md`: hướng dẫn riêng cho final production agent.
 
 ---
 
-## Yêu Cầu
+## Yêu Cầu Môi Trường
 
-```bash
-python 3.11+
-docker & docker compose
+- Python 3.11 trở lên.
+- Docker Desktop.
+- Docker Compose.
+- Git.
+- PowerShell hoặc terminal tương đương.
+- Railway CLI nếu muốn deploy lại.
+
+Không cần OpenAI API key thật vì lab dùng mock LLM.
+
+---
+
+## Chạy Nhanh Final Project
+
+```powershell
+cd D:\Vin\assignments\day12_ha-tang-cloud_va_deployment\06-lab-complete
+docker compose up -d
 ```
 
-Mỗi folder có `requirements.txt` riêng. Không cần API key thật — các ví dụ dùng **mock LLM** để chạy offline.
+Kiểm tra health và readiness:
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8000/health"
+Invoke-RestMethod -Uri "http://localhost:8000/ready"
+```
+
+Kiểm tra API không có key, kỳ vọng `401`:
+
+```powershell
+Invoke-WebRequest -Uri "http://localhost:8000/ask" `
+  -Method Post `
+  -ContentType "application/json" `
+  -Body '{"user_id":"demo","question":"hello"}' `
+  -UseBasicParsing
+```
+
+Kiểm tra API có key:
+
+```powershell
+$key = (Get-Content .env | Where-Object { $_ -match '^AGENT_API_KEY=' } | Select-Object -First 1) -replace '^AGENT_API_KEY=', ''
+
+Invoke-RestMethod -Uri "http://localhost:8000/ask" `
+  -Method Post `
+  -Headers @{"X-API-Key"=$key} `
+  -ContentType "application/json" `
+  -Body '{"user_id":"demo","question":"hello"}'
+```
+
+Dừng stack:
+
+```powershell
+docker compose down
+```
 
 ---
 
-## Sections
+## Kiểm Tra Production Readiness
 
-| # | Folder | Concept chính |
-|---|--------|--------------|
-| 1 | `01-localhost-vs-production` | Dev/prod gap, 12-factor, secrets |
-| 2 | `02-docker` | Dockerfile, multi-stage, docker-compose |
-| 3 | `03-cloud-deployment` | Railway, Render, Cloud Run |
-| 4 | `04-api-gateway` | Auth, rate limiting, cost protection |
-| 5 | `05-scaling-reliability` | Health check, stateless, rolling deploy |
-| 6 | `06-lab-complete` | **Full production agent** |
+```powershell
+cd D:\Vin\assignments\day12_ha-tang-cloud_va_deployment\06-lab-complete
+python check_production_ready.py
+```
+
+Kết quả đã kiểm tra:
+
+```text
+Result: 25/25 checks passed (100%)
+Status: PRODUCTION READY
+```
 
 ---
 
-## 📚 Lab Materials
+## Docker Image Size
 
-Chúng tôi đã chuẩn bị đầy đủ tài liệu hướng dẫn:
+Lệnh build:
 
-### Cho Sinh Viên
+```powershell
+cd D:\Vin\assignments\day12_ha-tang-cloud_va_deployment
+docker build -f 02-docker/develop/Dockerfile -t my-agent:develop .
+docker build -f 02-docker/production/Dockerfile -t my-agent:advanced .
+docker images my-agent
+```
 
-| Tài liệu | Mô tả | Thời gian |
-|----------|-------|-----------|
-| **[CODE_LAB.md](CODE_LAB.md)** | Hướng dẫn lab chi tiết từng bước | 3-4 giờ |
-| **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** | Cheat sheet các lệnh và patterns | Tra cứu |
-| **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** | Giải quyết lỗi thường gặp | Khi cần |
+Kết quả đã kiểm tra:
 
-### Cho Giảng Viên
+```text
+my-agent:develop    1.66GB
+my-agent:advanced   236MB
+```
 
-| Tài liệu | Mô tả |
-|----------|-------|
-| **[INSTRUCTOR_GUIDE.md](INSTRUCTOR_GUIDE.md)** | Hướng dẫn chấm điểm và đánh giá |
+Image advanced dùng multi-stage build và nhỏ hơn khoảng `85.8%`.
 
-### Cách Sử Dụng
+---
 
-1. **Trước lab:** Đọc [CODE_LAB.md](CODE_LAB.md) để hiểu tổng quan
-2. **Trong lab:** Làm theo từng Part, tham khảo [QUICK_REFERENCE.md](QUICK_REFERENCE.md)
-3. **Gặp lỗi:** Xem [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
-4. **Sau lab:** Nộp Part 6 Final Project để chấm điểm
+## Docker Compose Part 2
+
+Chạy stack Docker production demo:
+
+```powershell
+cd D:\Vin\assignments\day12_ha-tang-cloud_va_deployment\02-docker\production
+docker compose up -d
+docker compose ps
+```
+
+Test qua Nginx:
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost/health"
+
+Invoke-RestMethod -Uri "http://localhost/ask" `
+  -Method Post `
+  -ContentType "application/json" `
+  -Body '{"question":"Explain microservices"}'
+```
+
+Các service đã kiểm tra:
+
+- `agent`: healthy.
+- `redis`: healthy.
+- `qdrant`: healthy.
+- `nginx`: running.
+
+Dừng stack:
+
+```powershell
+docker compose down
+```
+
+---
+
+## Scaling Demo Part 5
+
+Chạy 3 agent instances sau Nginx load balancer:
+
+```powershell
+cd D:\Vin\assignments\day12_ha-tang-cloud_va_deployment\05-scaling-reliability\production
+docker compose -p day12-scaling up -d --scale agent=3
+docker compose -p day12-scaling ps
+```
+
+Test stateless session với Redis:
+
+```powershell
+$env:PYTHONIOENCODING='utf-8'
+python test_stateless.py
+```
+
+Kết quả đã kiểm tra:
+
+- Requests được phục vụ bởi nhiều instance khác nhau.
+- Conversation history vẫn được giữ trong Redis.
+- Stateless design hoạt động đúng khi scale nhiều instance.
+
+Dừng stack:
+
+```powershell
+docker compose -p day12-scaling down
+```
+
+---
+
+## Railway Deployment
+
+Thông tin chi tiết nằm trong `DEPLOYMENT.md`.
+
+Public URL:
+
+```text
+https://agent-production-b973.up.railway.app
+```
+
+Các biến môi trường đã cấu hình trên Railway:
+
+- `ENVIRONMENT=production`
+- `AGENT_API_KEY`
+- `JWT_SECRET`
+- `REDIS_URL`
+- `RATE_LIMIT_PER_MINUTE=10`
+- `MONTHLY_BUDGET_USD=10`
+- `LOG_LEVEL=INFO`
+
+Redis được cấu hình bằng Railway managed Redis service.
+
+---
+
+## Screenshots
+
+Các ảnh bằng chứng nằm trong thư mục `screenshots/`:
+
+- `screenshots/dashboard.png`: Railway dashboard.
+- `screenshots/running.png`: service đang chạy.
+- `screenshots/test1.png`: kết quả `/health` và `/ready`.
+- `screenshots/test2.png`: kết quả gọi `/ask`.
+
+Nếu ảnh test có hiển thị API key thật, cần crop hoặc che key trước khi nộp.
+
+---
+
+## Bảo Mật
+
+Không commit các file sau:
+
+```text
+.env
+.env.local
+.env.production
+```
+
+Repo đã cấu hình `.gitignore` để bỏ qua các file env local.
+
+Trong tài liệu nộp bài chỉ dùng placeholder như `YOUR_KEY`, không ghi API key thật.
+
+---
+
+## Nộp Bài
+
+Theo `DAY12_DELIVERY_CHECKLIST.md`, repository cần có:
+
+- `MISSION_ANSWERS.md`
+- `DEPLOYMENT.md`
+- Source code final trong `06-lab-complete/`
+- Screenshot trong `screenshots/`
+- `.env.example`, không commit `.env`
+- Public URL hoạt động
+- README hướng dẫn rõ ràng
+
+Trước khi nộp, kiểm tra lại:
+
+```powershell
+git status --short
+git check-ignore -v 06-lab-complete/.env
+```
+
+Đảm bảo repository public hoặc giảng viên có quyền truy cập.
